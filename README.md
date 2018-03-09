@@ -1,15 +1,11 @@
 Annexe en ligne de l'article "[Etude de la démographie française du XIXe siècle à partir de données collaboratives de généalogie](https://hal.archives-ouvertes.fr/hal-01724269/)".
 
-Arthur Charpentier
-
-CREM, UMR CNRS 6211 & Université de Rennes 1
-
+Arthur Charpentier 
+CREM, UMR CNRS 6211 & Université de Rennes 1 
 [freakonometrics.hypotheses.org](http://freakonometrics.hypotheses.org/)
 
-Ewen Gallic
-
-CREM, UMR CNRS 6211 & Institut Louis Bachelier
-
+Ewen Gallic 
+CREM, UMR CNRS 6211 & Institut Louis Bachelier 
 [egallic.fr](http://egallic.fr/en/a_propos/)
 
 Mars 2018.
