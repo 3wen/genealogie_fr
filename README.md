@@ -1,4 +1,4 @@
-Annexe en ligne de l'article "Etude de la démographie française du XIXe siècle à partir de données collaboratives de généalogie."
+Annexe en ligne de l'article "[Etude de la démographie française du XIXe siècle à partir de données collaboratives de généalogie](https://hal.archives-ouvertes.fr/hal-01724269/)".
 
 Arthur Charpentier
 CREM, UMR CNRS 6211 & Université de Rennes 1
