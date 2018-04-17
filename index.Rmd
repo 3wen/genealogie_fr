@@ -3510,7 +3510,7 @@ head(surv_hist)
 
 ### Estimations à partir des données de généalogie
 
-Maintenant que nous disposons d'estimations de la probabilité de survie à chaque âge à partir des données issues de tables de mortalité, nous proposons nos estimations réalisées à partir des données de généalogie de Geneanet. Nous définissons une fonction, `calcul_survie_geneanet()`, qui à partir d'une année de naissance, 
+Maintenant que nous disposons d'estimations de la probabilité de survie à chaque âge à partir des données issues de tables de mortalité, nous proposons nos estimations réalisées à partir des données de généalogie de Geneanet. Nous définissons une fonction, `calcul_survie_geneanet()`, qui à partir d'une année de naissance, estime les probabilités de survie, de décès instantanné pour les hommes et les femmes, pour une la cohorte des individus nés cette année là.
 
 
 ```{r, eval=FALSE}
@@ -3518,12 +3518,11 @@ Maintenant que nous disposons d'estimations de la probabilité de survie à chaq
 #' Estime les probabilités de survie, de décès instantanné (en log) pour les hommes et les femmes
 #' pour des individus d'une cohorte donnée
 #' @une_annee (int) : année de naissance des individus à suivre
-#' @df (data.frame) : tableau de données indiquant les années de naissance et de décès des individus
-#' ainsi que leur sexe.
-calcul_survie_geneanet <- function(une_annee, df){
-  aieux_annee <- df %>% 
+calcul_survie_geneanet <- function(une_annee){
+  aieux_annee <- aieux %>% 
     tbl_df() %>% 
-    filter(date_N_annee_aieul == une_annee)
+    filter(date_N_annee_aieul == une_annee) %>% 
+    filter(age_aieul >= 6)
   # On compte le nombre de personne encore en vie à chaque année
   calcul_exposition <- function(une_annee, sexe){
     aieux_annee %>% filter(date_D_annee_aieul >= une_annee, sexe_aieul == sexe) %>% nrow()
@@ -3544,6 +3543,8 @@ calcul_survie_geneanet <- function(une_annee, df){
     mutate(exposition_h = ifelse(exposition_h <= 0, yes = 1, no = exposition_h),
            exposition_f = ifelse(exposition_h <= 0, yes = 1, no = exposition_f)) %>% 
     # Calcul du nombre de décès
+    # mutate(expo_moins_1_h = lag(exposition_h),
+    #        expo_moins_1_f = lag(exposition_f)) %>% 
     mutate(expo_plus_1_h = lead(exposition_h),
            expo_plus_1_f = lead(exposition_f)) %>%
     mutate(deces_h = exposition_h - expo_plus_1_h,
@@ -3562,6 +3563,7 @@ calcul_survie_geneanet <- function(une_annee, df){
     mutate(annee_naissance = une_annee)
   
   # Survie
+  # exposition_annee$lx_f[1] <- exposition_annee$lx_h[1] <- 1
   exposition_annee$sx_h <- cumprod(exposition_annee$sx_h)
   exposition_annee$sx_f <- cumprod(exposition_annee$sx_f)
   exposition_annee
@@ -3573,11 +3575,11 @@ On calcule donc les probabilités de survie et de décès instantanné pour les 
 
 ```{r, eval=FALSE}
 library(pbapply)
-surv_geneanet_c <- 
-  pblapply(1800:1804, calcul_survie_geneanet, df = aieux %>% filter(age_aieul >= 6)) %>% 
+surv_geneanet_tot <- 
+  pblapply(1800:1804, calcul_survie_geneanet) %>% 
   bind_rows()
 
-head(surv_geneanet_c)
+head(surv_geneanet_tot)
 ```
 
 ```{r, echo=FALSE}
@@ -3590,7 +3592,7 @@ Comme pour les données issues des tables de mortalité, nous calculons la moyen
 
 ```{r, eval=FALSE}
 surv_geneanet <- 
-  surv_geneanet %>% 
+  surv_geneanet_tot %>% 
   group_by(age) %>% 
   summarise(fm_h = mean(fm_h, na.rm=T), fm_f = mean(fm_f, na.rm=T),
             sx_h = mean(sx_h, na.rm=T), sx_f = mean(sx_f, na.rm=T))
@@ -3641,62 +3643,82 @@ p
 ```
 
 
-On peut représenter également la force de mortalité :
+### Estimations à partir des données de généalogie, pour l'ensemble des individus
 
-```{r}
-df_plot_mx <- 
-  surv_hist %>% 
-  select(age, sexe, mx) %>% 
-  mutate(mx = log(mx)) %>% 
-  mutate(type = "Historique") %>% 
-  bind_rows(
-    surv_geneanet %>% 
-      select(age, fm_h, fm_f) %>% 
-      gather(sexe, mx, fm_h, fm_f) %>% 
-      mutate(type = "Geneanet") %>% 
-      mutate(sexe = ifelse(sexe == "fm_h", yes = "1", no = sexe),
-             sexe = ifelse(sexe == "fm_f", yes = "2", no = sexe))
-  ) %>% 
-  mutate(sexe = factor(sexe, levels = c("2","1"), labels = c("Femmes", "Hommes")))
+Cette fois, on peut effectuer les calculs pour l'ensemble des individus, non plus en se restreignant à ceux ayant au moins 6 ans.
 
-head(df_plot_mx)
+```{r, eval=FALSE}
+#' calcul_survie_geneanet_tot
+#' Estime les probabilités de survie, de décès instantanné (en log) pour les hommes et les femmes
+#' pour des individus d'une cohorte donnée, dans un département donné
+#' @une_annee (int) : année de naissance des individus à suivre
+# une_annee <- 1800
+calcul_survie_geneanet_tot <- function(une_annee){
+  aieux_annee <- 
+    aieux %>% 
+    tbl_df() %>% 
+    filter(date_N_annee_aieul == une_annee)
+  
+  # On compte le nombre de personne encore en vie à chaque année
+  calcul_exposition <- function(une_annee, sexe){
+    aieux_annee %>% filter(date_D_annee_aieul >= une_annee, sexe_aieul == sexe) %>% nrow()
+  }
+  
+  annees <- seq(une_annee, une_annee+110)
+  
+  exposition_annee_h <- data.frame(annee = annees, exposition = sapply(annees, calcul_exposition,  sexe = "1")) %>% tbl_df()
+  exposition_annee_f <- data.frame(annee = annees, exposition = sapply(annees, calcul_exposition, sexe = "2")) %>% tbl_df()
+  exposition_annee <- 
+    exposition_annee_h %>% rename(exposition_h = exposition) %>% 
+    left_join(exposition_annee_f %>% rename(exposition_f = exposition), by = "annee") %>% 
+    mutate(age = annees-une_annee)
+  
+  
+  exposition_annee <- 
+    exposition_annee %>% 
+    mutate(exposition_h = ifelse(exposition_h <= 0, yes = 1, no = exposition_h),
+           exposition_f = ifelse(exposition_h <= 0, yes = 1, no = exposition_f)) %>% 
+    # Calcul du nombre de décès
+    # mutate(expo_moins_1_h = lag(exposition_h),
+    #        expo_moins_1_f = lag(exposition_f)) %>% 
+    mutate(expo_plus_1_h = lead(exposition_h),
+           expo_plus_1_f = lead(exposition_f)) %>%
+    mutate(deces_h = exposition_h - expo_plus_1_h,
+           deces_f = exposition_f - expo_plus_1_f) %>% 
+    mutate(sx_h = (exposition_h - deces_h) / exposition_h,
+           sx_f = (exposition_f - deces_f) / exposition_f) %>% 
+    select(-expo_plus_1_h, -expo_plus_1_f) %>% 
+    # Proba de déceder dans l'année
+    mutate(qxt_h = deces_h / exposition_h,
+           qxt_f = deces_f / exposition_f) %>% 
+    mutate(qxt_h = ifelse(qxt_h <= 0, yes = NA, no = qxt_h),
+           qxt_f = ifelse(qxt_f <= 0, yes = NA, no = qxt_f)) %>% 
+    # Calcul de la force de mortalité
+    mutate(fm_h = log(qxt_h),
+           fm_f = log(qxt_f)) %>% 
+    mutate(annee_naissance = une_annee)
+  
+  # Survie
+  # exposition_annee$lx_f[1] <- exposition_annee$lx_h[1] <- 1
+  exposition_annee$sx_h <- cumprod(exposition_annee$sx_h)
+  exposition_annee$sx_f <- cumprod(exposition_annee$sx_f)
+  exposition_annee
+}# Fin de calcul_survie_geneanet_tot()
 ```
 
-```{r, eval=TRUE, fig.align = "center", fig.width = 7, fig.height = 4.5}
-p_mx <- 
-  ggplot(data = df_plot_mx, aes(x = age, y = mx, colour = sexe, linetype = type)) +
-  geom_line() +
-  scale_colour_manual("", values = c("Femmes" = "red", "Hommes" = "blue")) +
-  scale_linetype_manual("", values = c("Historique" = "dashed", "Geneanet" = "solid")) +
-  xlab("âge") + ylab("log(mu_x)") +
-  scale_x_continuous(breaks = scales::pretty_breaks(n = 10))
-p_mx
-```
+```{r, eval=FALSE}
+surv_geneanet_2_tot_c <- pblapply(1800:1804, calcul_survie_geneanet_tot)
+surv_geneanet_2_tot_c <- bind_rows(surv_geneanet_2_tot_c)
 
-Et enfin, on peut tracer ces deux graphiques sur une seule figure :
-
-```{r, eval=TRUE, fig.align = "center", fig.width = 7, fig.height = 4.5}
-df_plot <- 
-  df_plot_survie %>% select(-mx) %>% rename(value = sx) %>% mutate(variable = "sx") %>% 
-  bind_rows(df_plot_mx %>% rename(value = mx) %>% mutate(variable = "mx"))
-
-p_survie <- 
-  ggplot(data = df_plot %>% mutate(variable = factor(variable, levels = c("sx", "mx"),
-labels = c("Probabilité de survie", "Force de mortalité (en log)"))),
-         aes(x = age, y = value, colour = sexe, linetype = type)) +
-  geom_line() +
-  scale_colour_manual("", values = c("Femmes" = "red", "Hommes" = "blue")) +
-  scale_linetype_manual("", values = c("Historique" = "dashed", "Geneanet" = "solid")) +
-  xlab("age") + ylab(NULL) +
-  scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
-  facet_wrap(~variable, scales = "free_y", nrow = 1)
-
-p_survie
+surv_geneanet_2_tot <- 
+  surv_geneanet_2_tot_c %>% 
+  group_by(age) %>% 
+  summarise(fm_h = mean(fm_h, na.rm=T), fm_f = mean(fm_f, na.rm=T),
+            sx_h = mean(sx_h, na.rm=T), sx_f = mean(sx_f, na.rm=T))
 ```
 
 
-## Mortalité régionale par cohorte
-
+### Estimations à partir des données de généalogie, par département
 
 Nous voulons également explorer la mortalité au travers de ses différences régionales. Nous adaptons le code précédent pour que les estimations s'effectuent à l'échelle des régions.
 
@@ -3823,7 +3845,115 @@ p <-
 p
 ```
 
-Pour la force de mortalité :
+
+
+## Estimation de la force de mortalité
+
+
+À partir des estimations réalisées dans la section précédente, on peut se pencher sur la force de mortalité, c'est-à-dire la probabilité, pour un individu ayant atteint un âge donné, de décéder dans le courant de l'année.
+
+
+### Pour les données de Vallin & Meslé comparées à celles de Geneanet
+
+```{r}
+df_plot_mx <- 
+  surv_hist %>% 
+  select(age, sexe, mx) %>% 
+  mutate(mx = log(mx)) %>% 
+  mutate(type = "Historique") %>% 
+  bind_rows(
+    surv_geneanet %>% 
+      select(age, fm_h, fm_f) %>% 
+      gather(sexe, mx, fm_h, fm_f) %>% 
+      mutate(type = "Geneanet") %>% 
+      mutate(sexe = ifelse(sexe == "fm_h", yes = "1", no = sexe),
+             sexe = ifelse(sexe == "fm_f", yes = "2", no = sexe))
+  ) %>% 
+  mutate(sexe = factor(sexe, levels = c("2","1"), labels = c("Femmes", "Hommes")))
+
+head(df_plot_mx)
+```
+
+```{r, eval=TRUE, fig.align = "center", fig.width = 7, fig.height = 4.5}
+p_mx <- 
+  ggplot(data = df_plot_mx, aes(x = age, y = mx, colour = sexe, linetype = type)) +
+  geom_line() +
+  scale_colour_manual("", values = c("Femmes" = "red", "Hommes" = "blue")) +
+  scale_linetype_manual("", values = c("Historique" = "dashed", "Geneanet" = "solid")) +
+  xlab("âge") + ylab("log(mu_x)") +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10))
+p_mx
+```
+
+Et enfin, on peut tracer ces deux graphiques sur une seule figure :
+
+```{r, eval=TRUE, fig.align = "center", fig.width = 7, fig.height = 4.5}
+df_plot <- 
+  df_plot_survie %>% select(-mx) %>% rename(value = sx) %>% mutate(variable = "sx") %>% 
+  bind_rows(df_plot_mx %>% rename(value = mx) %>% mutate(variable = "mx"))
+
+p_survie <- 
+  ggplot(data = df_plot %>% mutate(variable = factor(variable, levels = c("sx", "mx"),
+labels = c("Probabilité de survie", "Force de mortalité (en log)"))),
+         aes(x = age, y = value, colour = sexe, linetype = type)) +
+  geom_line() +
+  scale_colour_manual("", values = c("Femmes" = "red", "Hommes" = "blue")) +
+  scale_linetype_manual("", values = c("Historique" = "dashed", "Geneanet" = "solid")) +
+  xlab("age") + ylab(NULL) +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
+  facet_wrap(~variable, scales = "free_y", nrow = 1)
+
+p_survie
+```
+
+
+### Pour l'ensemble des individus de Geneanet, par département
+
+```{r, eval=FALSE}
+df_plot_mx_2 <- 
+  surv_geneanet_2_depts %>% 
+  select(dept, age, fm_h, fm_f) %>% 
+  gather(sexe, mx, fm_h, fm_f) %>% 
+  mutate(sexe = ifelse(sexe == "fm_h", yes = "1", no = sexe),
+         sexe = ifelse(sexe == "fm_f", yes = "2", no = sexe)) %>% 
+  mutate(sexe = factor(sexe, levels = c("2","1"), labels = c("Femmes", "Hommes")))
+
+
+
+p_mx_2 <- 
+  ggplot(data = df_plot_mx_2, aes(x = age, y = mx, colour = sexe, group = interaction(dept, sexe))) +
+  geom_line(alpha = .2) +
+  scale_colour_manual("", values = c("Femmes" = "red", "Hommes" = "blue")) +
+  xlab("\\^age") + ylab("$log(\\mu\\_x$)") +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10))
+
+p_mx_2+theme_paper()
+
+
+# Les deux graphiques combinés
+
+df_plot_2 <- 
+  df_plot_survie_2 %>% rename(value = sx) %>% mutate(variable = "sx") %>% 
+  bind_rows(df_plot_mx_2 %>% rename(value = mx) %>% mutate(variable = "mx"))
+
+p_survie_2 <- 
+  ggplot(data = df_plot_2 %>% 
+           mutate(variable = factor(variable, levels = c("sx", "mx"),
+                                    labels = c("Probabilit\\'e de survie", "Force de mortalit\\'e (en log)"))),
+         aes(x = age, y = value, colour = sexe, group = interaction(dept, sexe))) +
+  geom_line(alpha=.1) +
+  scale_colour_manual("", values = c("Femmes" = "red", "Hommes" = "blue")) +
+  xlab("\\^age") + ylab(NULL) +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
+  facet_wrap(~variable, scales = "free_y", nrow = 1)
+
+
+p_survie_2+theme_paper()
+```
+
+
+
+## Mortalité régionale par cohorte
 
 ```{r, fig.align = "center", fig.width = 7, fig.height = 4.5}
 df_plot_mx_2 <- 
@@ -3871,7 +4001,77 @@ p_survie_2
 
 ## Espérance de vie à la naissance
 
-À l'aide des estimations des fonctions de survie pour les femmes et les hommes, il est aisé de calculer les espérances de vie à la naissance des individus, par département. Nous construisons une fonction effectuant le calcul.
+À l'aide des estimations des fonctions de survie pour les femmes et les hommes, il est aisé de calculer les espérances de vie à la naissance des individus.
+
+### Pour Vallin et Meslé (2010)
+
+Calculons l'espérance de vie à la naissance avec les données de Vallin et Meslé.
+
+```{r, eval=FALSE}
+# Espérance de vie à la naissance pour la cohorte de 1806, données de Vallin et Meslé.
+vallin_1806 <- 
+  survie_diag(annee_naiss_depart = 1806, sexe = "1", age_min = 0) %>% 
+  bind_rows(survie_diag(annee_naiss_depart = 1806, sexe = "2", age_min = 0))
+vallin_1806 %>% 
+  group_by(sexe) %>% 
+  summarise(e = sum(cumprod(exp(-mx)), na.rm=T))
+```
+
+### Pour l'ensemble des aïeux
+
+Nous construisons une fonction effectuant le calcul.
+
+```{r, eval=FALSE}
+calcul_esperance_vie_naissance_aieux <- function(df, summ = FALSE, age_min = 0){
+  res <- 
+    df %>% 
+    filter(age_min >= age_min) %>% 
+    left_join(
+      df %>% 
+        # group_by(annee_naissance, dept) %>% 
+        filter(age == 0) %>% 
+        select(annee_naissance, exposition_h, exposition_f) %>% 
+        rename(exposition_f1 = exposition_f, exposition_h1 = exposition_h),
+      by = c("annee_naissance")
+    ) %>% 
+    mutate(e_h = exposition_h / exposition_h1,
+           e_f = exposition_f / exposition_f1) %>% 
+    group_by(annee_naissance) %>% 
+    summarise(e_h = sum(e_h)-0.5,
+              e_f = sum(e_f)-0.5) %>% 
+    ungroup()
+  if(summ){
+    res <- res %>% summarise(e_h = mean(e_h), e_f = mean(e_f))
+  }
+  res
+}
+
+```
+
+Nous appliquons cette fonction à notre table de mortalité concernant la totalité des aïeux.
+
+```{r, eval=FALSE}
+esperance_vie_aieux <- 
+  calcul_esperance_vie_naissance_aieux(surv_geneanet_2_tot_c)
+```
+
+```{r, echo=FALSE}
+load("../git/rda_files/esperance_vie_aieux.rda")
+```
+
+
+```{r}
+esperance_vie_aieux %>% 
+  knitr::kable(digit=2)
+
+esperance_vie_aieux_mean <- 
+  esperance_vie_aieux %>% 
+  summarise(e_h = mean(e_h), e_f = mean(e_f))
+esperance_vie_aieux_mean
+```
+
+
+### Par département
 
 
 ```{r, eval=TRUE}
@@ -4119,7 +4319,589 @@ p_map
 
 ```
 
+## Intervalles de confiance pour les espérances de vie à la naissance
 
+Nous allons estimer des intervalles de confiance pour les espérances de vie à la naissance. Deux méthodes sont envisagées. Une première est d'utiliser ce que propose Carlo Giovanni Camarda sur son site (https://sites.google.com/site/carlogiovannicamarda/r-stuff/life-expectancy-confidence-interval). Une seconde est fortement inspirée de cette méthode, mais s'avère plus simple à mettre en oeuvre. Les deux méthodes sont fondées sur du bootstrap.
+
+Nous récupérons la fonction `lifetable.qx()` servant à constuire une table de mortalité à partir des probabilités de décès.
+
+```{r, eval=FALSE}
+## function for constructing a lifetable starting from probabilities
+lifetable.qx <- function(x, qx, sex="M", ax=NULL, last.ax=5.5){
+  m <- length(x)
+  n <- c(diff(x), NA)
+  qx[is.na(qx)] <- 0
+  if(is.null(ax)){
+    ax <- rep(0,m)
+    if(x[1]!=0 | x[2]!=1){
+      ax <- n/2
+      ax[m] <- last.ax
+    }else{    
+      if(sex=="F"){
+        if(qx[1]>=0.1){
+          ax[1] <- 0.350
+        }else{
+          ax[1] <- 0.05 + 3*qx[1]
+        }
+      }
+      if(sex=="M"){
+        if(qx[1]>=0.1){
+          ax[1] <- 0.33
+        }else{
+          ax[1] <- 0.0425 + 2.875*qx[1]
+        }
+      }
+      ax[-1] <- n[-1]/2
+      ax[m] <- last.ax
+    }
+  }
+  px  <- 1-qx
+  lx  <- cumprod(c(1,px))*100000
+  dx  <- -diff(lx)
+  Lx  <- n*lx[-1] + ax*dx
+  lx <- lx[-(m+1)]
+  Lx[m] <- lx[m]*last.ax
+  Lx[is.na(Lx)] <- 0 ## in case of NA values
+  Lx[is.infinite(Lx)] <- 0 ## in case of Inf values
+  Tx  <- rev(cumsum(rev(Lx)))
+  ex  <- Tx/lx
+  data.frame(x, n, ax, qx, px, lx, dx, Lx, Tx, ex)
+}
+```
+
+Cette fonction est appelée par celle qui suit, cette dernière permettant quant à elle de calculer les intervalles de confiance pour l'espérance de vie à un âge donné. Elle est légèrement adaptée des codes proposés par Camarda.
+
+```{r, eval=FALSE}
+#' ex_ci
+#' @description Compute a confidence interval for life expectancy
+#' https://sites.google.com/site/carlogiovannicamarda/r-stuff/life-expectancy-confidence-interval
+#' @param LT Life table
+#' @param which.x Which age for the life expectancy
+#' @param level level of the confidence interval
+#' @param ns number of samples
+#' @param sex 'F' (female) of 'M' (male)
+#' @param year_birth year of birth of the cohort
+#' @param dept_birth departement of birth
+#' which.x <- 0; level <- 0.95; ns <- 1000; sex="M"; year_birth <- 1800 ; dept_birth <- "F29"
+ex_ci <- function(LT, which.x=0, level=0.95, ns=1000, sex="M", year_birth = 1800, dept_birth = "F29"){
+  ## ages
+  x <- LT$age
+  if(sex == "M"){
+    ## number of deaths
+    Dx <- LT$deces_h
+    ## estimated probs
+    qx <- LT$qxt_h
+  }else{
+    ## number of deaths
+    Dx <- LT$deces_f
+    ## estimated probs
+    qx <- LT$qxt_f
+  }
+  
+  ## number of ages
+  m <- nrow(LT)
+  
+  ## trials for binomial, rounded
+  Ntil <- round(Dx/qx)
+  ## ax for last age
+  # last.ax <- LT$ax[m]
+  ## simulated death counts
+  ## from Binomial distribution
+  Y <- suppressWarnings(matrix(rbinom(m*ns,
+                                      Ntil,
+                                      qx),
+                               m,ns))
+  ## simulated probabilities
+  QX <- Y/Ntil
+  ## which age?
+  wh <- which(x==which.x)
+  
+  ## for all replicates, compute life expectancy
+  fun.ex <- function(qx){
+    return(lifetable.qx(x=x, qx, sex=sex)$ex[wh])
+  }
+  exsim <- apply(QX, 2, fun.ex)
+  
+  ## confidence interval
+  CI <- quantile(exsim,
+                 probs = c((1-level)/2,
+                           1 - (1-level)/2))
+  
+  data.frame(ex_mean = mean(exsim),
+             ex_inf = CI[[1]],
+             ex_sup = CI[[2]],
+             age = which.x,
+             sexe = sex,
+             annee_naissance = year_birth,
+             dept = dept_birth,
+             stringsAsFactors = FALSE)
+  
+} # Fin de ex_ci()
+```
+
+Nous introduisons également une fonction permettant d'utiliser la seconde méthode. Cette méthode consiste à considérer une population $E_0$ née une année donnée (*e.g.*, 1800) ayant une probabilité de décéder dans l'année ($\widehat{q}_x$, estimée sur nos données pour cette cohorte). Il s'agit de procéder de manière itérative. À l'âge $x$, s'il reste $E_x$ personnes en vie, le nombre de décès $D_x$ est tiré suivant une loi binomiale $\mathcal{B}(E_x,\widehat{q}_x)$. Ensuite, nous posons $E_{x+1}=E_x - D_x$, c'est-à-dire que nous considérons le nombre de personnes en vie à l'âge suivant égal au nombre de personnes en vie à l'âge $x$ auquel nous retranchons le nombre de décès qui vient d'être tiré. Nous tirons alors un nouveau nombre de décès pour l'âge suivant, et ainsi de suite. Ces étapes itératives sont reproduites de manière indépendante dans $1~000$ échantillons. Dans chacun de ces échantillons, nous calculons l'espérance de vie à la naissance selon les tirages effectués. Les quantiles empiriques d'ordres $0,025$ et $0,975$ deviennent alors les bornes de l'intervalle de confiance à $95\%$ pour l'espérance de vie à la naissance des individus de la cohorte étudiée. La fonction `simu()` ci-après permet d'effectuer un tirage. Il s'agira de faire appel à `simu()` de manière itérative pour obtenir différents échantillons.
+
+```{r, eval=FALSE}
+#' simu
+#' @description Estime des IC par bootstrap pour les esperances de vie a la naissance
+#' a partir d'une table de vie
+#' @param i valeur seed
+#' @param LT Table de mortalite
+simu <- function(i, LT){
+  set.seed(i)
+  d_h=d_f=rep(0,111)
+  e_h=LT$exposition_h
+  e_f=LT$exposition_f
+  q_h=LT$qxt_h
+  q_f=LT$qxt_f
+  
+  # Last not NA value :
+  ind_max_not_na_h <- max(which(!is.na(q_h)))
+  ind_na_h <- which(is.na(q_h))
+  q_h[ind_na_h[ind_na_h> ind_max_not_na_h]]=1
+  
+  ind_max_not_na_f <- max(which(!is.na(q_f)))
+  ind_na_f <- which(is.na(q_f))
+  q_f[ind_na_f[ind_na_f> ind_max_not_na_f]]=1
+  
+  if(any(is.na(q_h))){
+    loess_h <- loess(q_h~age, data = data.frame(q_h = q_h, age = 1:length(q_h)))
+    ind_missing_h <- which(is.na(q_h))
+    predicted_h <- predict(loess_h, newdata = data.frame(age = ind_missing_h))
+    predicted_h[predicted_h>1] <- 1
+    predicted_h[predicted_h<0] <- 0
+    q_h[ind_missing_h] <- predicted_h
+  }
+  
+  if(any(is.na(q_f))){
+    loess_f <- loess(q_f~age, data = data.frame(q_f = q_f, age = 1:length(q_f)))
+    ind_missing_f <- which(is.na(q_f))
+    predicted_f <- predict(loess_f, newdata = data.frame(age = ind_missing_f))
+    predicted_f[predicted_f>1] <- 1
+    predicted_f[predicted_f<0] <- 0
+    q_f[ind_missing_f] <- predicted_f
+  }
+  
+  for(t in 1:110){
+    D_h = rbinom(1,size=e_h[t],prob=q_h[t])
+    d_h[t] = D_h
+    e_h[t+1] = e_h[t]-d_h[t]
+    D_f = rbinom(1,size=e_f[t],prob=q_f[t])
+    d_f[t] = D_f
+    e_f[t+1] = e_f[t]-d_f[t]  
+  }
+  s_h=e_h/e_h[1]
+  s_f=e_f/e_f[1]
+  
+  list(E_h=sum(s_h)-.5,E_f=sum(s_f)-.5)
+}# Fin de simu()
+```
+
+### Pour Vallin et Meslé
+
+```{r, eval=FALSE}
+LT_h <- lifetable_fr %>% filter(Year1 == 1806, Sex == 1, TypeLT == 1)
+LT_f <- lifetable_fr %>% filter(Year1 == 1806, Sex == 2, TypeLT == 1)
+
+#'
+#'@param LT Life table
+#'@param ns number of samples to draw
+#'@param which.x age for which to compute life expectancy
+#'@param level level for the confidence interval
+ex_ci_vallin <- function(LT, ns=1000, which.x=0, level=0.95){
+  ## sex
+  sex <- LT$Sex %>% unique()
+  ## ages
+  x <- LT$Age
+  ## number of deaths
+  Dx <- LT$`d(x)`
+  ## estimated probs
+  qx <- LT$`q(x)`
+  
+  ## number of ages
+  m <- nrow(LT)
+  
+  ## trials for binomial, rounded
+  Ntil <- round(Dx/qx)
+  ## ax for last age
+  # last.ax <- LT$ax[m]
+  ## simulated death counts
+  ## from Binomial distribution
+  Y <- suppressWarnings(matrix(rbinom(m*ns,
+                                      Ntil,
+                                      qx),
+                               m,ns))
+  ## simulated probabilities
+  QX <- Y/Ntil
+  ## which age?
+  wh <- which(x==which.x)
+  
+  ## for all replicates, compute life expectancy
+  fun.ex <- function(qx){
+    return(lifetable.qx(x=x, qx, sex=sex)$ex[wh])
+  }
+  exsim <- apply(QX, 2, fun.ex)
+  
+  ## confidence interval
+  CI <- quantile(exsim,
+                 probs = c((1-level)/2,
+                           1 - (1-level)/2))
+  
+  data.frame(ex_mean = mean(exsim),
+             ex_inf = CI[[1]],
+             ex_sup = CI[[2]],
+             age = which.x,
+             sexe = sex,
+             annee_naissance = which.x,
+             stringsAsFactors = FALSE)
+  
+}# End of ex_ci_vallin()
+
+ex_vallin <- ex_ci_vallin(LT = LT_h) %>% 
+  bind_rows(
+    ex_ci_vallin(LT = LT_f)
+  )
+
+ex_vallin
+```
+
+### Pour les aïeux
+
+Nous proposons une fonction, `e_ic_cohorte()`, qui à partir d'une année de naissance, estime par bootstrap les intervalles de confiance pour l'espérance de vie à la naissance de la cohorte d'individus nés cette année.
+
+```{r, eval=FALSE}
+#' e_ic_cohorte
+#' @param year_birth annee de naissance de la cohorte
+#' @param ns nombre d'échantillons
+#' #' @param level niveau de l'intervalle de confiance
+e_ic_cohorte <- function(year_birth, ns=1000, level=0.95){
+  LT <- surv_geneanet_2_tot_c %>% filter(annee_naissance == year_birth)
+  E=lapply(1:ns,simu, LT=LT)
+  BE=matrix(unlist(E),nrow=2)
+  
+  ex_mean <- apply(BE,1,mean)
+  ex_inf <- apply(BE,1,function(x) quantile(x,(1-level)/2))
+  ex_sup <- apply(BE,1,function(x) quantile(x,1 - (1-level)/2))
+  
+  data.frame(ex_mean = ex_mean,
+             ex_inf = ex_inf,
+             ex_sup = ex_sup,
+             sexe = c("M", "F"),
+             annee_naissance = year_birth,
+             stringsAsFactors = FALSE)
+}# Fin de e_ic_cohorte()
+```
+
+```{r, eval=FALSE}
+ex_aieux <- pblapply(1800:1804, e_ic_cohorte)
+ex_aieux <- bind_rows(ex_aieux)
+
+ex_aieux_avg <- 
+  ex_aieux %>% 
+  group_by(sexe) %>% 
+  summarise(ex_mean = mean(ex_mean),
+            ex_inf = mean(ex_inf),
+            ex_sup = mean(ex_sup))
+```
+
+```{r, echo=FALSE}
+load("../git/rda_files/ex_aieux_avg.rda")
+```
+
+```{r}
+ex_aieux_avg
+```
+
+
+### Pour les aïeux, par département
+
+Ici, nous proposons d'utiliser les deux méthodes d'estimation des intervalles de confiance.
+
+#### Première méthode
+
+Nous appliquons la méthode de Carlo Giovanni Camarda (https://sites.google.com/site/carlogiovannicamarda/r-stuff/life-expectancy-confidence-interval).
+
+Nous bouclons sur les années de naissance des aïeux, pour chaque sexe, et pour chaque département.
+
+```{r, eval=FALSE}
+annees <- 1800:1804
+sexes <- c("F", "M")
+depts <- sort(unique(surv_geneanet_2_depts_c$dept))
+
+n_tot <- length(annees)*length(sexes)*length(depts)
+pb <- txtProgressBar(min = 1, max = n_tot, style = 3)
+i <- 1
+ex_depts <- NULL
+for(annee in annees){
+ for(sexe in sexes) {
+   for(dept in depts){
+     LT <- surv_geneanet_2_depts_c %>% filter(annee_naissance == annee, dept == dept)
+     tmp <- ex_ci(LT=LT, year_birth = annee, sex = sexe, dept_birth = dept)
+     ex_depts <- bind_rows(ex_depts, tmp)
+     rm(tmp, LT)
+     setTxtProgressBar(pb, i)
+     i <- i+1
+   }
+ }
+}
+
+```
+
+```{r, echo=FALSE}
+load("../Migration/ex_depts.rda")
+```
+
+
+```{r}
+head(ex_depts)
+```
+
+#### Seconde méthode
+
+En utilisant notre méthode à présent.
+
+```{r, eval=FALSE}
+#' ex_ci
+#' @description Compute a confidence interval for life expectancy
+#' From an initial population $E_0$ born in `year_birth`, et a probability of dying within the current year
+#' $\widehat{q}_x$ previously estimated, proceeds as follows:
+#' For age $x$, if $E_x$ people are still alive, the number of deaths $D_x$ is drawn from a Binomial $B(E_x,q_x)$ distribution
+#' and we then posit $E_{x+1}=E_x-D_x$.
+#' @param level level of the confidence interval
+#' @param ns number of samples
+#' @param year_birth year of birth of the cohort
+#' @param dept_birth departement of birth
+#' which.x <- 0; level <- 0.95; ns <- 1000; sex="M"; year_birth <- 1800 ; dept_birth <- "F29"
+ex_ci_2 <- function(level=0.95, ns=1000, year_birth = 1800, dept_birth = "F29"){
+  
+  LT <- surv_geneanet_2_depts_c %>% filter(annee_naissance == year_birth, dept == dept_birth)
+  
+  E=lapply(1:ns,simu, LT=LT)
+  BE=matrix(unlist(E),nrow=2)
+  
+  ex_mean <- apply(BE,1,mean)
+  ex_inf <- apply(BE,1,function(x) quantile(x,(1-level)/2))
+  ex_sup <- apply(BE,1,function(x) quantile(x,1 - (1-level)/2))
+  
+  data.frame(ex_mean = ex_mean,
+             ex_inf = ex_inf,
+             ex_sup = ex_sup,
+             sexe = c("M", "F"),
+             annee_naissance = year_birth,
+             dept = dept_birth,
+             stringsAsFactors = FALSE)
+  
+} # Fin de ex_ci_2()
+```
+
+Comme cette méthode effectue les estimations pour chaque sexe dans la fonction `simu()`, nous itérons uniquement sur les années de naissance et sur les départements.
+
+```{r, eval=FALSE}
+n_tot <- length(annees)*length(depts)
+pb <- txtProgressBar(min = 1, max = n_tot, style = 3)
+i <- 1
+ex_depts_2 <- NULL
+for(annee in annees){
+  for(dept in depts){
+    tmp <- ex_ci_2(year_birth = annee, dept_birth = dept)
+    ex_depts_2 <- bind_rows(ex_depts_2, tmp)
+    rm(tmp)
+    setTxtProgressBar(pb, i)
+    i <- i+1
+  }
+}
+
+```
+
+```{r, echo=FALSE}
+load("../Migration/ex_depts_2.rda")
+load("../git/rda_files/ex_depts_avg.rda")
+```
+
+```{r}
+head(ex_depts_2)
+```
+
+```{r, eval=FALSE}
+ex_depts_avg <- 
+  ex_depts_2 %>% 
+  group_by(dept, sexe) %>% 
+  summarise(ex_mean = mean(ex_mean),
+            ex_inf = mean(ex_inf),
+            ex_sup = mean(ex_sup))
+```
+
+```{r}
+head(ex_depts_avg)
+```
+
+
+Nous pouvons alors grapher les estimations des espérances de vie à la naissance accompagnées des intervalles de confiance.
+
+```{r, eval=FALSE}
+esperance_vie_mean_ic <- 
+esperance_vie_mean_2 %>% 
+  left_join(
+    ex_depts_avg %>% 
+      filter(sexe == "F") %>% 
+      rename(ex_mean_F = ex_mean, ex_inf_F = ex_inf, ex_sup_F = ex_sup) %>% 
+      select(-sexe) %>% 
+      left_join(
+        ex_depts_avg %>% 
+          filter(sexe == "M") %>% 
+          rename(ex_mean_M = ex_mean, ex_inf_M = ex_inf, ex_sup_M = ex_sup) %>% 
+          select(-sexe)
+      )
+  )
+
+esperance_vie_mean_ic %>% 
+  mutate(outside = e_f_walle <= ex_inf_F,
+         inside = e_f_walle > ex_inf_F & e_f_walle < ex_sup_F) %>% 
+  summarise(outside = sum(outside, na.rm=T),
+            inside = sum(inside, na.rm=T))
+```
+
+```{r, echo=FALSE}
+load("../git/rda_files/esperance_vie_mean_ic.rda")
+```
+
+
+```{r, eval=TRUE, fig.align = "center", fig.width = 7, fig.height = 4.5}
+p_error_bar_e <- 
+  esperance_vie_mean_ic %>% 
+  # mutate(departement = str_c(nom_sp, " (", str_sub(dept, 2), ")")) %>% 
+  mutate(departement = str_sub(dept, 2)) %>% 
+  select(departement, e_h, e_f, ex_inf_M, ex_sup_M, ex_inf_F, ex_sup_F) %>% 
+  unite(values_f, e_f, ex_inf_F, ex_sup_F, sep = "@") %>% 
+  unite(values_h, e_h, ex_inf_M, ex_sup_M, sep = "@") %>% 
+  gather(sexe, value, values_h, values_f) %>% 
+  separate(value, c("e", "e_inf", "e_sup"), sep = "@", convert = TRUE) %>% 
+  mutate(echantillon = "Geneanet") %>% 
+  filter(!is.na(departement)) %>% 
+  ggplot(data = ., aes(x = departement, y = e, colour = sexe)) +
+  geom_point() +
+  geom_errorbar(aes(ymin = e_inf, ymax = e_sup), width=1, size = .8) +
+  scale_colour_manual("Sexe", values = c("values_f" = "red", "values_h" = "blue"),
+                      labels = c("values_f" = "Femmes", "values_h" = "Hommes")) +
+  geom_point(data = 
+               esperance_vie_mean_ic %>% 
+                   # mutate(departement = str_c(nom_sp, " (", str_sub(dept, 2), ")")) %>% 
+                   mutate(departement = str_sub(dept, 2)) %>% 
+                   select(departement, e_f_walle) %>% 
+                   mutate(sexe = "values_f") %>% 
+                   rename(e = e_f_walle) %>% 
+               mutate(echantillon = "van de Walle"),
+             aes(x = departement, y = e, shape = echantillon), colour = "black") +
+  scale_shape_manual("", values = c("van de Walle" = 17)) +
+  theme(axis.text.x = element_text(angle = 90, size = .6*20)) +
+  xlab("Département") + ylab("Espérance de vie à la naissance")
+
+p_error_bar_e
+```
+
+Nous produisons également une représentation sous forme de carte.
+
+```{r, eval=FALSE}
+esperance_vie_map_ic <- 
+  france_1800 %>% 
+  left_join(esperance_vie_mean_2 %>% 
+              select(dept, e_f, e_h), by = c("departement" = "dept"))
+```
+
+Pour pouvoir ajouter les intervalles de confiance relatifs aux estimations de chaque département, nous récupérons les coordonnées de barycentres de chaque département.
+
+```{r, eval=FALSE}
+# Barycentres
+library(sp)
+obtenir_spa_poly_sp <- function(un_dep){
+  dep_tmp <- france_1800 %>%
+    filter(departement == un_dep)
+  
+  obtenir_poly_groupe <- function(un_groupe){
+    coords_group <- dep_tmp[which(dep_tmp$group %in% un_groupe), c("long", "lat")]
+    return(Polygons(list(Polygon(coords_group)), un_groupe))
+  }
+  dep_polys <- lapply(unique(dep_tmp$group), obtenir_poly_groupe)
+  dep_polys_sp <- SpatialPolygons(dep_polys, seq(1, length(dep_polys)))
+  dep_polys_sp
+}
+
+france_1800_sp <- lapply(unique(france_1800$departement), obtenir_spa_poly_sp)
+names(france_1800_sp) <- unique(france_1800$departement)
+france_1800_barycentres <- lapply(france_1800_sp, function(x) rgeos::gCentroid(x))
+france_1800_barycentres <- do.call("rbind", lapply(france_1800_barycentres, function(x) x@coords))
+france_1800_barycentres <- cbind(france_1800_barycentres, departement = unique(france_1800$departement))
+france_1800_barycentres <- data.frame(france_1800_barycentres, stringsAsFactors = FALSE) %>% tbl_df()
+rownames(france_1800_barycentres) <- NULL
+france_1800_barycentres <-
+  france_1800_barycentres %>%
+  mutate(long = as.numeric(x), lat = as.numeric(y)) %>%
+  select(-x,-y)
+```
+
+La carte de base est la suivante :
+```{r, eval=FALSE}
+p_map <- 
+  ggplot() +
+  geom_polygon(data = esperance_vie_map_ic %>% 
+                 gather(sexe, esperance, e_f, e_h) %>% 
+                 mutate(sexe = factor(sexe, levels = c("e_f", "e_h"), labels = c("Femmes", "Hommes"))),
+               aes(x = long, y = lat, group = group, fill = esperance)) +
+  facet_grid(~sexe) +
+  scale_x_continuous(limits = c(-6, 10)) +
+  scale_y_continuous(limits = c(41, 51.5)) +
+  scale_fill_gradient("Espérance de vie à la naissance (années)", low = "yellow", high = "red") +
+  coord_quickmap() +
+  theme(legend.position = "bottom", text = element_text(size = 6),
+        legend.key.height	= unit(1, "line"),
+        legend.key.width	= unit(1.5, "line"))
+```
+
+Nous rajoutons les intervalles de confiance :
+```{r, eval=FALSE}
+val_longueur <- 1
+val_corresp <- .1
+
+longueur_ic <- 
+  ex_depts_avg %>% 
+  left_join(france_1800_barycentres, by = c("dept" = "departement")) %>% 
+  mutate(longueur_ic_tx = ex_sup - ex_inf) %>% 
+  mutate(
+    lat_beg = lat - (val_corresp * longueur_ic_tx/val_longueur)/2,
+    lat_2 = lat + (val_corresp * longueur_ic_tx/val_longueur)/2) %>% 
+  mutate(sexe = factor(sexe, levels = c("F", "M"), labels = c("Femmes", "Hommes")))
+
+legende_x <- -4.5
+legende_y <- 43
+
+legende_min <- 5
+legende_max <- 10
+
+p_map <- 
+  p_map +
+  geom_errorbar(data = longueur_ic,
+                aes(x = long, ymin = lat_beg, ymax = lat_2), colour = "black", size = 1.5, width=0.2) +
+  geom_errorbar(data = longueur_ic,
+                aes(x = long, ymin = lat_beg, ymax = lat_2), colour = "white", size = 1, width=0.1) +
+  geom_errorbar(data = data.frame(long = legende_x, lat = legende_y, longueur_ic_tx = c(legende_min, legende_max)) %>%
+                  mutate(lat_2 = lat + val_corresp * longueur_ic_tx/val_longueur),
+                aes(x = long, ymin = lat, ymax = lat_2), colour = "black", size = 1.5, width=0.2) +
+  geom_errorbar(data = data.frame(long = legende_x, lat = legende_y, longueur_ic_tx = c(legende_min, legende_max)) %>%
+                  mutate(lat_2 = lat + val_corresp * longueur_ic_tx/val_longueur),
+                aes(x = long, ymin = lat, ymax = lat_2), colour = "white", size = 1, width=0.1) +
+  geom_text(data = data.frame(long = legende_x + .5, lat = legende_y, longueur_ic_tx = c(legende_min, legende_max)) %>% 
+              mutate(lat_2 = lat + val_corresp * longueur_ic_tx/val_longueur),
+            aes(x = long, y = lat_2, label = longueur_ic_tx))
+```
+
+```{r, echo=FALSE}
+load("../git/rda_files/p_map.rda")
+```
+
+
+```{r, eval=TRUE, fig.align = "center", fig.width = 7, fig.height = 4.5}
+p_map
+```
 
 # Dimension spatiale des données : sédentarité et migration intérieure en France
 
