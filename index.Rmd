@@ -75,7 +75,8 @@ Le nombre de données relevant quasiment du milliard d'observations, un ordinate
 Les données dont nous disposons sont partagées en trois tronçons. Malgré ce découpage, le nombre de lignes reste trop conséquent pour l'ordinateur. Nous décidons d'effectuer un découpage plus important.
 
 Pour importer un tronçons, nous utilisons la fonction `fread`. Nous lisons les observations par petits morceaux de \(20\times10^6\) lignes. Dans un premier temps, il nous est nécessaire de connaître le nombre total d'observations du tronçons sur lequel nous travaillons. L'instruction suivante nous permet de révéler cette information :
-  ```{r, eval=FALSE}
+
+```{r, eval=FALSE}
 library(dplyr)
 library(stringr)
 library(ggplot2)
