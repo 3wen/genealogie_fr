@@ -611,6 +611,10 @@ save(res, file = str_c("../data/individuals/migration/", departement,"/chunk_", 
 
 
 
+
+
+
+
 ## Rassemblement des arbres et élimination de doublons
 
 Comme chaque usager du site Geneanet peut construire son propre arbre, il existe de nombreux doublons. Nous adoptons une stratégie en plusieurs étapes pour tenter de joindre les arbres entre-eux, tout en évitant les doublons. Du fait de l'important des données manquantes, cette tâche s'avère délicate. Il persiste sûrement au final des doublons, qui ne seront, pour la plupart, pas utilisés dans l'analyse. En effet, s'ils n'ont pas été repérés en tant que doublons, c'est qu'ils sont porteur de très peu d'informations, et seront donc écartés par la suite.
@@ -1896,6 +1900,84 @@ corresp <-
 
 Reste ensuite à boucler sur le registre et à appliquer la fonction de simplification, comme dans les étapes précédentes.
 
+### Quelques statistiques descriptives sur les étapes de détection des doublons
+
+Pour obtenir quelques informations sur le nombre d'arbres d'utilisateurs par département, et sur le nombre d'individus que contiennent leurs arbres, nous proposons quelques statistiques descriptives. Le Tableau ci-dessous fournit le nombre d'individus dans les arbres des utilisateurs, dans chacun des découpages de la base effectués par département. On lit ainsi que pour le département 01 (l'Ain), le nombre d'individus présents dans les 3916 arbres des utilisateurs ayant reporté au moins un ancêtre né dans l'Ain entre 1800 et 1804, s'élève à 186 160. À l'issue de la première étape de simplification, ce nombre d'individus tombe à 139 168. Ainsi, la première étape de simplification a identifié 46 992 doublons (c.f. colonne `nb_doublons_1`). À l'issue de la sixième simplification, le nombre d'individus présents dans les arbres pour le tronçon de données correspondant à l'ain s'élève à 123 412. Aussi, le nombre de doublons identifiés lors du passage des six algorithmes s'élève à 62 748 (c.f. colonne `nb_doublons_fin`).
+
+```{r, size="small", echo=F}
+load("rda_files/nb_users_depts.rda")
+load("rda_files/stat_des_depts_nb_obs_depts.rda")
+
+data <- 
+  nb_users_depts %>% 
+  left_join(nb_obs_depts) %>% 
+  select(dept, nb_users_depts, nb_obs, etape) %>% 
+  spread(etape, nb_obs) %>% 
+  mutate(nb_doublons_fin = `Données brutes` - `Etapes 5 et 6`) %>% 
+  # Quelle est la part de doublons identifiés dès la première étape ?
+  mutate(nb_doublons_1 = `Données brutes` - `Etape 1`) %>% 
+  mutate(pct_etape_1 = nb_doublons_1 / nb_doublons_fin * 100) %>% 
+  mutate(pct_etape_1 = round(pct_etape_1, 2))
+
+data %>% 
+  DT::datatable()
+```
+
+
+Comme l'indique la colonne intitulée `pct_etape_1`, le pourcentage de doublons repérés lors de la première simplification représente $74,89\%$ de l'ensemble des doublons reprérés pour le tronçon de l'Ain. On peut noter que pour l'ensemble des départements, ce pourcentage demeure élevé, allant de $63,99\%$ (06 Alpes-Maritimes) à $86,34\%$ (88 Vosges), la moyenne s'établissant à $80,37\%$. La Figure ci-dessous indique le nombre d'individus non détectés comme étant des doublons à chacune des étapes de simplification, pour chaque département (les points d'un département sont reliés).
+
+
+```{r, echo=FALSE, eval=TRUE, fig.align = "center", fig.width = 7, fig.height = 4.5}
+ggplot(data = nb_obs_depts %>%
+              left_join(
+                data.frame(etape = c("Données brutes", "Etape 1", "Etape 2", "Etape 3", "Etape 4", "Etapes 5 et 6"),
+                           etape_num = seq(0, 5))
+              ),
+            aes(x = etape_num, y = nb_obs/1000, group = dept)) +
+  geom_line(alpha = .2) +
+  geom_point(alpha=.2) +
+  scale_x_continuous(breaks = 0:5, labels = c("Données brutes", "Etape 1", "Etape 2", "Etape 3", "Etape 4", "Etapes 5 et 6")) +
+  xlab("Étape") + ylab("Nombre d'individus (x 1000)")
+```
+
+
+Il peut être utile de donner quelques exemples de doublons identifiés. Prenons un exemple spécifique de doublons détecté dans le département 35, Ille-et-Vilaine. L'application des différents algorithmes a permis de désigner que parmi les 368 340 individus (présents dans 7 474 arbres distincts), 7 d'entre-eux sont susceptibles de faire mention de la même personne, à savoir un certain Jean Esnault né dans la commune nommée Montreuil-sous-Pérouse, le 15 août 1837 (cf Tableau ci-dessous). On note que dans cet exemple, le nom, le prénom et la date de naissance est commune à toutes les observations. Le regroupement de ces observations en une seule permet :
+
+- d'attribuer une date de décès plus précise pour les observations ne mentionnant ni le mois ni l'année (les valeurs indiquent 00 et 00) ;
+- de corriger la date de décès de l'observation 2, qui est observée moins fréquemment que le 15 juin 1858 (on note toutefois qu'il est possible que la vraie date de décès soit celle indiquée à l'observation 2, nous avons émis l'hypothèse qu'en cas d'informations différentes, celle la plus fréquemment observée serait retenue) ;
+- de compléter les branches manquantes pour le père dans toutes les observations en prenant la valeur donnée pour la deuxième comme référence.
+
+
+|nom     |prenom |lieu_N                        |dept_N |date_N   |lieu_D                        |dept_D |date_D   |prenom_mere |prenom_pere |
+|:-------|:------|:-----------------------------|:------|:--------|:-----------------------------|:------|:--------|:-----------|:-----------|
+|esnault |jean   |Montreuil sous Pérouse, 35500 |F35    |18370815 |NA                            |NA     |18580000 |sainte      |NA          |
+|esnault |jean   |Montreuil-sous-Pérouse, 35194 |F35    |18370815 |Montreuil-sous-Pérouse, 35194 |F35    |18580614 |NA          |pierre      |
+|esnault |jean   |Montreuil-sous-Pérouse, 35500 |F35    |18370815 |NA                            |NA     |18580000 |sainte      |NA          |
+|esnault |jean   |Montreuil-sous-Pérouse, 35194 |F35    |18370815 |Montreuil-sous-Pérouse, 35194 |F35    |18580615 |sainte      |NA          |
+|esnault |jean   |Montreuil-sous-Pérouse,35500  |F35    |18370815 |Montreuil-sous-Pérouse,35500  |F35    |18580615 |sainte      |NA          |
+|esnault |jean   |Montreuil-sous-Pérouse, 35500 |F35    |18370815 |NA                            |NA     |18580000 |sainte      |NA          |
+|esnault |jean   |Montreuil sous Pérouse, 35194 |F35    |18370815 |NA                            |NA     |18580000 |sainte      |NA          |
+
+
+Prenons un deuxième exemple, celui d'une certaine Clarisse Dupuy-Fromy, née à Saint-Malo le 20 septembre 1803. Dans les données concernant l'Ille-et-Vilaine, 6 utilisateurs de Généanet ont mentionné cette personne, avec plus ou moins de détails. La mise en commun des arbres de ces 6 personnes permet de définir une date de naissance, une de décès et un lien avec les deux parents. On note dans le tableau ci-dessous que le jour de naissance ne fait pas l'objet d'un accord entre les différents généalogistes. Notre algorithme désigne la valeur finale en fonction de la fréquence d'observation ; ainsi, dans les données finales, il est supposé que le jour de naissance de Clarisse Dupuy-Fromy est le 20 septembre 1803. La date de décès ne pourras pas bénéficier d'une précision accrue grâce à une des observations, seule l'année est mentionnée, 1833.
+
+|nom         |prenom   |lieu_N            |dept_N |date_N   |lieu_D |dept_D |date_D   |prenom_mere  |prenom_pere |
+|:-----------|:--------|:-----------------|:------|:--------|:------|:------|:--------|:------------|:-----------|
+|dupuy-fromy |clarisse |Saint-Malo, 35400 |F35    |18030927 |NA     |NA     |18330000 |NA           |NA          |
+|dupuy-fromy |clarisse |Saint-Malo, 35400 |F35    |18030927 |NA     |NA     |18330000 |marie        |jacques     |
+|dupuy-fromy |clarisse |St-Malo, 350288   |F35    |18030920 |NA     |NA     |18330000 |marie        |jacques     |
+|fromy       |clarisse |St-Malo           |F35    |18030000 |NA     |NA     |NA       |marie        |jean        |
+|dupuy-fromy |clarisse |St-Malo           |F35    |18030928 |NA     |NA     |18330000 |marie        |jacques     |
+|dupuyfromy  |clarisse |Saint-Malo, 35288 |F35    |18030920 |NA     |NA     |18330000 |marietherese |jacques     |
+|dupuyfromy  |clarisse |Saint-Malo, 35400 |F35    |18030920 |NA     |NA     |18330000 |marie        |jacques     |
+|dupuyfromy  |clarisse |Saint-Malo,35288  |F35    |18030920 |NA     |NA     |18330000 |marie        |jacques     |
+|dupuy-fromy |clarisse |Saint-Malo, 35400 |F35    |18030920 |NA     |NA     |18330000 |marie        |jacques     |
+|fromy       |clarisse |Saint Malo        |F35    |18030920 |NA     |NA     |NA       |marie        |jean        |
+|dupuy-fromy |clarisse |St Malo, 35400    |F35    |18030927 |NA     |NA     |18330000 |NA           |NA          |
+|dupuyfromy  |clarisse |Saint-Malo, 35288 |F35    |18030920 |NA     |NA     |NA       |marie        |jacques     |
+|dupuy-fromy |clarisse |Saint-Malo        |F35    |18031227 |NA     |NA     |18330000 |marie        |jacques     |
+
+
 ## Mise en commun des données départementales
 
 Dans la section précédente, nous avons rassemblé les arbres par département. Il est question dans cette nouvelle section de mettre en commun les bases départementales, afin de créer une base française.
@@ -2354,7 +2436,7 @@ gen_0 <- registre[id_personne_num %in% gen_0$id_personne_num]
 ```
 
 
-Nous allons construire cet tableau génération par génération. Nous définissons à cet effet un tableau contenant la génération courante, qui sera modifé quand on s'intéressera aux enfants, petits-enfants, etc. Il s'agit de l'initialiser.
+Nous allons construire cet tableau génération par génération. Nous définissons à cet effet un tableau contenant la génération courante, qui sera modifié quand on s'intéressera aux enfants, petits-enfants, etc. Il s'agit de l'initialiser.
 
 
 ```{r, eval=FALSE}
@@ -2380,7 +2462,7 @@ generations <-
 
 #### Enfants
 
-Identifionts à présent les enfants de la génération courante.
+Identifions à présent les enfants de la génération courante.
 
 ```{r, eval=FALSE}
 peres_potentiels <- 
@@ -3118,7 +3200,8 @@ spread(sexe, pct_nais)
 ```
 
 ```{r, eval=TRUE,echo=FALSE}
-load("../git/rda_files/p_repres.rda")
+# load("../git/rda_files/p_repres.rda")
+load("../git/rda_files/p_repres_data.rda")
 ```
 
 ```{r, eval=FALSE}
@@ -3131,7 +3214,12 @@ facet_wrap(~sexe)
 ```
 
 ```{r, eval=TRUE,echo=TRUE, fig.align = "center", fig.width = 7, fig.height = 4.5}
-p_repres
+p_repres <- ggplot() +
+  geom_polygon(data = p_repres_data,
+               aes(x = long, y = lat, group = group, fill = pct_nais), size = .4) +
+  coord_quickmap() +
+  scale_fill_gradientn("%", colours = rev(heat.colors(10)), na.value = "grey") +
+  facet_wrap(~sexe)
 ```
 
 
@@ -3198,7 +3286,7 @@ sexes %>%
 On peut également calculer le taux de masculinité :
   
   
-  ```{r, eval=TRUE}
+```{r, eval=TRUE}
 sexes %>% 
   tbl_df() %>% 
   group_by(sexe) %>% 
@@ -3212,7 +3300,7 @@ sexes %>%
 Il n'est pas compliqué de calculer le pourcentage d'hommes par départements :
   
   
-  ```{r, eval=TRUE}
+```{r, eval=TRUE}
 representativite_fh <- 
   sexes %>% 
   filter(str_detect(dept_N, "^F[[:digit:]]{2}")) %>% 
@@ -3236,7 +3324,7 @@ representativite_fh_sex_ratio <-
 
 On peut alors préparer un tableau de données pour effectuer une représentation graphique :
   
-  ```{r, eval=TRUE}
+```{r, eval=TRUE}
 representativite_map_fh <- 
   france_1800 %>% 
   left_join(
@@ -3367,9 +3455,9 @@ meres %>%
 
 
 
-# Dimension temporelle des données : mortalité
+# Examen de la mortalité des français au début du XIXe siècle
 
-Dans cette section, nous présentons les codes développés pour étudier les aspects temporels relatifs aux données. Nous nous concentrons principalement sur les aïeux de la base, à savoir les individus nés entre 1800 et 1804.
+Dans cette section, nous présentons les codes développés pour étudier la mortalité à partir des données de généanlogie collaborative. Nous nous concentrons principalement sur les aïeux de la base, à savoir les individus nés entre 1800 et 1804.
 
 
 Nous pouvons explorer les questions de mortalité grâce aux dates de naissance et de décès des individus. Nous allons principalement nous concentrer sur les aïeux, mais les méthodes peuvent être appliquées à l'ensemble de la base.
@@ -3406,7 +3494,7 @@ Nous avons également besoin de récupérer des données de mortalité. Nous té
 lifetable_fr <- read_csv("lifetable_FRA.csv")
 ```
 
-Nous définissons une fonction pour extraire, pour une cohorte donnée, la probabilité de décès instantanné $\mu_x$ (qui est équivalente à $q_x$, c'est à dire la probabilité qu'un individu âgé de $x$ ne survive pas en $x+1$).
+Nous définissons une fonction pour extraire, pour une cohorte donnée, la probabilité de décès instantané $\mu_x$ (qui est équivalente à $q_x$, c'est à dire la probabilité qu'un individu âgé de $x$ ne survive pas en $x+1$).
 
 ```{r, eval=FALSE}
 #' qx_annee_age
@@ -3497,7 +3585,7 @@ survies_diagonale_1800_1804 %>%
   ggtitle("Fonctions de survie des femmes et des hommes par cohortes")
 ```
 
-Les estimations sont données par cohorte, nous les aggrégeons pour le groupe 1800-1804, en prenant la moyenne des probabilités de survie et de décès instantanné, par âge et sexe.
+Les estimations sont données par cohorte, nous les agrégeons pour le groupe 1800-1804, en prenant la moyenne des probabilités de survie et de décès instantané, par âge et sexe.
 
 ```{r, eval=TRUE}
 surv_hist <- 
@@ -4904,7 +4992,7 @@ load("../git/rda_files/p_map.rda")
 p_map
 ```
 
-# Dimension spatiale des données : sédentarité et migration intérieure en France
+# Sédentarité et migration intérieure en France au XIXe siècle
 
 
 Nous pouvons explorer les aspects spatiaux qu'offrent les données de généalogie dans plus de détail. On commence par charger quelques *packages*, ainsi que des cartes de France et les données de généalogie spécifiques au sous-échantillon d'individus susceptibles d'être en âge de migrer.
@@ -5109,7 +5197,7 @@ tableau_distances_3 <-
          moins_20_pct = (moins_20 / moins_20_not_na * 100) %>% round(2))
 ```
 
-On agrègr ces trois tableaux en un seul :
+On agrège ces trois tableaux en un seul :
 
 ```{r}
 tableau_distances <- 
@@ -5306,7 +5394,7 @@ generations_dist_table_tex %>%
 
 ## Transitions entre petites et grandes villes
 
-Nous allors faire un point sur la migration entre les villes, selon le type de ces dernières. La Statistique Générale de la France (SGF) fournit des statistiques pour certaines communes : [https://www.insee.fr/fr/statistiques/2591293?sommaire=2591397](les chefs-lieux et les grandes communes). Nous décidons de séparer les communes en plusieurs catégories, en reprenant le principe de @fleury_1958_Population et @Blayo_1975_Population_mouv, qui consiste à segmenter les communes en fonction de leur nombre d'habitants. Nous utilisons les statistiques de population de 1836 pour définir, parmi les communes présentes dans les données de la SGF :
+Nous allons faire un point sur la migration entre les villes, selon le type de ces dernières. La Statistique Générale de la France (SGF) fournit des statistiques pour certaines communes : [https://www.insee.fr/fr/statistiques/2591293?sommaire=2591397](les chefs-lieux et les grandes communes). Nous décidons de séparer les communes en plusieurs catégories, en reprenant le principe de @fleury_1958_Population et @Blayo_1975_Population_mouv, qui consiste à segmenter les communes en fonction de leur nombre d'habitants. Nous utilisons les statistiques de population de 1836 pour définir, parmi les communes présentes dans les données de la SGF :
 
   - les grandes villes (plus de 50 000 habitants) ;
   - les villes moyennes (entre 10 000 et 50 000 habitants) ;
